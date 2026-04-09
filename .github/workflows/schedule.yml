@@ -2,7 +2,7 @@ name: Daily Tech News Email
 
 on:
   schedule:
-  #  - cron: '0 18 * * *'  # Runs at 18:00 UTC (UNCOMMENT FOR YOUR USE) 
+   - cron: '0 18 * * *'  # Runs at 18:00 UTC (UNCOMMENT FOR YOUR USE) 
   workflow_dispatch:  # For manual runs or debugging 
 
 jobs:
