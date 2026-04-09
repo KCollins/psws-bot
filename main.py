@@ -19,7 +19,6 @@ def send_email(email_config):
         msg['To'] = email_config['receiver_email']
         msg['Subject'] = f"Daily Notification - {current_time}"
         
-        # Creating the simplified email body
         body = (
             "Hello!\n\n"
             f"This is your daily automated message. The current system time is: {current_time}.\n\n"
@@ -29,20 +28,26 @@ def send_email(email_config):
         
         msg.attach(MIMEText(body, 'plain')) 
       
-        # Connecting to SMTP server using SSL
-        with smtplib.SMTP_SSL(email_config['smtp_server'], email_config['smtp_port'], timeout=15) as server:
+        # --- NEW CONNECTION LOGIC FOR GMAIL (PORT 587) ---
+        # Initialize connection
+        server = smtplib.SMTP(email_config['smtp_server'], email_config['smtp_port'], timeout=15)
+        
+        # Upgrade the connection to secure TLS
+        server.starttls() 
+        
+        with server:
+            # Log in using the 16-character App Password
             server.login(email_config['sender_email'], email_config['smtp_password']) 
             server.send_message(msg)
             logging.info("Email sent successfully")
+        # ------------------------------------------------
           
     except (smtplib.SMTPException, Exception) as e: 
         logging.error(f"Failed to send email: {str(e)}")
         raise
 
 def validate_config(config):
-    # Removed newsapi_key from required fields
     required_keys = ['sender_email', 'receiver_email', 'smtp_server', 'smtp_port', 'smtp_password']
-  
     missing = [key for key in required_keys if not config.get(key) or str(config.get(key)).strip() == ""]
 
     if missing:
@@ -57,7 +62,6 @@ def validate_config(config):
       
 if __name__ == "__main__":
     try:
-        # Loading environment variables (News API key removed)
         config = {
             'sender_email': os.getenv('SENDER_EMAIL'),
             'receiver_email': os.getenv('RECEIVER_EMAIL'),
@@ -69,7 +73,6 @@ if __name__ == "__main__":
         validate_config(config)
         logging.info("Configuration validated successfully")
       
-        # Directly send the email with the timestamp
         send_email(config)
             
     except Exception as e:
