@@ -17,7 +17,7 @@ def send_email(email_config):
         msg = MIMEMultipart()
         msg['From'] = email_config['sender_email']
         msg['To'] = email_config['receiver_email']
-        msg['Subject'] = f"Daily Notification - {current_time}"
+        msg['Subject'] = f"PSWS Today- {current_time}"
         
         body = (
             "Hello!\n\n"
