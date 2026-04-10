@@ -13,44 +13,65 @@ logging.basicConfig(level=logging.INFO,
 
 def fetch_psws_summary():
     """
-    Scrapes the PSWS Observation List table for a general overview of yesterday's activity.
+    Scrapes all pages of the PSWS Observation List for yesterday's data.
     """
-    # Calculate "Yesterday"
     yesterday_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-    
-    # URL for the general overview (all stations)
     base_url = "https://pswsnetwork.eng.ua.edu/observations/observation_list/"
-    query_url = f"{base_url}?station=&startDate__gte={yesterday_date}&endDate__lte={yesterday_date}"
     
-    report_data = []
-    try:
-        logging.info(f"Scraping daily overview from: {query_url}")
-        response = requests.get(query_url, timeout=30)
-        response.raise_for_status()
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        table = soup.find('table', {'class': 'obsTable'})
-        
-        if not table:
-            return []
+    all_observations = []
+    page_num = 1
+    max_pages = 15 # Safety cap to prevent hitting rate limits too hard
 
-        # Find all rows in the table body
-        rows = table.find('tbody').find_all('tr')
+    while page_num <= max_pages:
+        # Build URL with the current page number
+        query_url = (
+            f"{base_url}?station=&startDate__gte={yesterday_date}"
+            f"&endDate__lte={yesterday_date}&page={page_num}"
+        )
         
-        for row in rows:
-            cols = row.find_all('td')
-            if len(cols) >= 6:
-                # Column 2 (index 2) is the Station Name
-                # Column 5 (index 5) is the File/Observation ID
-                station = cols[2].get_text(strip=True)
-                obs_id = cols[5].get_text(strip=True)
-                report_data.append(f"{station}: {obs_id}")
-        
-        return report_data
+        try:
+            logging.info(f"Scraping Page {page_num}...")
+            response = requests.get(query_url, timeout=30)
+            
+            # If a page doesn't exist (e.g., page 99), the server usually 
+            # returns a 404 or redirects. We stop if that happens.
+            if response.status_code != 200:
+                break
+                
+            soup = BeautifulSoup(response.text, 'html.parser')
+            table = soup.find('table', {'class': 'obsTable'})
+            
+            if not table:
+                break
 
-    except Exception as e:
-        logging.error(f"Scraping failed: {str(e)}")
-        return None
+            rows = table.find('tbody').find_all('tr')
+            if not rows:
+                break
+            
+            # Extract data from the current page
+            for row in rows:
+                cols = row.find_all('td')
+                if len(cols) >= 6:
+                    station = cols[2].get_text(strip=True)
+                    obs_id = cols[5].get_text(strip=True)
+                    all_observations.append(f"{station}: {obs_id}")
+
+            # Check if there's a "Next" page in the pagination UI
+            # We look for a link that points to the next page number
+            pagination = soup.find('ul', {'class': 'pagination'})
+            next_page_str = f"page={page_num + 1}"
+            
+            if not pagination or next_page_str not in str(pagination):
+                logging.info("No more pages found. Stopping.")
+                break
+                
+            page_num += 1
+
+        except Exception as e:
+            logging.error(f"Error on page {page_num}: {str(e)}")
+            break
+            
+    return all_observations
 
 def send_email(email_config, observations):
     try:
