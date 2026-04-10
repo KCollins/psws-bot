@@ -2,6 +2,7 @@ import os
 import smtplib
 import logging
 import requests
+from bs4 import BeautifulSoup
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
@@ -10,36 +11,47 @@ from datetime import datetime, timedelta
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
-def fetch_psws_status(station_id):
+def fetch_psws_file_list(station_id):
     """
-    Checks the PSWS API for files posted yesterday.
+    Scrapes the PSWS Observation List page for filenames from yesterday.
     """
-    yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+    # Calculate "Yesterday"
+    yesterday_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
     
-    # API Parameters
-    base_url = "https://pswsnetwork.eng.ua.edu/observations/downloadapi/"
-    params = {
-        'station_id': station_id,
-        'start_date': yesterday,
-        'end_date': yesterday
-    }
+    # Construct the URL with filters
+    # Note: station_id can be left blank for 'all stations'
+    base_url = "https://pswsnetwork.eng.ua.edu/observations/observation_list/"
+    query_url = (
+        f"{base_url}?station={station_id}"
+        f"&startDate__gte={yesterday_date}"
+        f"&endDate__lte={yesterday_date}"
+    )
     
+    files = []
     try:
-        logging.info(f"Checking PSWS data for {station_id} on {yesterday}...")
-        response = requests.get(base_url, params=params, timeout=30)
+        logging.info(f"Scraping file list from: {query_url}")
+        response = requests.get(query_url, timeout=30)
+        response.raise_for_status()
         
-        if response.status_status == 200:
-            return f"✅ Success! Data files were found and are available for {yesterday}."
-        elif response.status_code == 404:
-            return f"⚪ No observations were found for {yesterday}."
-        else:
-            return f"⚠️ API returned status code: {response.status_code}"
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Finding the filenames. 
+        # Based on the PSWS site structure, we look for text containing 'OBS' or links ending in '.zip'
+        for link in soup.find_all('a'):
+            href = link.get('href', '')
+            text = link.get_text().strip()
             
-    except Exception as e:
-        logging.error(f"API Request failed: {str(e)}")
-        return "❌ Failed to connect to the PSWS Network API."
+            if "OBS" in text and ".zip" in text:
+                files.append(text)
+        
+        # Deduplicate and return
+        return sorted(list(set(files)))
 
-def send_email(email_config, psws_report):
+    except Exception as e:
+        logging.error(f"Scraping failed: {str(e)}")
+        return None
+
+def send_email(email_config, file_list):
     try:
         current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         yesterday_str = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
@@ -47,14 +59,21 @@ def send_email(email_config, psws_report):
         msg = MIMEMultipart()
         msg['From'] = email_config['sender_email']
         msg['To'] = email_config['receiver_email']
-        msg['Subject'] = f"PSWS Daily Update - {yesterday_str}"
+        msg['Subject'] = f"PSWS Update: {len(file_list)} files found for {yesterday_str}"
         
+        # Format the list of files for the email body
+        if file_list:
+            file_section = "\n".join([f"• {f}" for f in file_list])
+            status_msg = f"The following {len(file_list)} files were posted yesterday:"
+        else:
+            file_section = "No files found for this period."
+            status_msg = "The network was quiet yesterday."
+
         body = (
             f"Hello!\n\n"
-            f"Here is the daily update from the Personal Space Weather Station Network.\n\n"
-            f"--- Report for {yesterday_str} ---\n"
-            f"Station ID: {email_config['station_id']}\n"
-            f"Status: {psws_report}\n\n"
+            f"--- Daily Report for {yesterday_str} ---\n"
+            f"{status_msg}\n\n"
+            f"{file_section}\n\n"
             f"System check performed at: {current_time}.\n"
             "— Your GitHub Bot"
         )
@@ -74,12 +93,10 @@ def send_email(email_config, psws_report):
         raise
 
 def validate_config(config):
-    required_keys = ['sender_email', 'receiver_email', 'smtp_server', 'smtp_port', 'smtp_password', 'station_id']
-    missing = [key for key in required_keys if not config.get(key) or str(config.get(key)).strip() == ""]
-
+    required_keys = ['sender_email', 'receiver_email', 'smtp_server', 'smtp_port', 'smtp_password']
+    missing = [key for key in required_keys if not config.get(key)]
     if missing:
-        logging.error(f"Missing configuration: {', '.join(missing)}")
-        raise ValueError("Missing environment variables")
+        raise ValueError(f"Missing environment variables: {', '.join(missing)}")
 
 if __name__ == "__main__":
     try:
@@ -89,16 +106,20 @@ if __name__ == "__main__":
             'smtp_server': os.getenv('SMTP_SERVER'),
             'smtp_port': os.getenv('SMTP_PORT'),
             'smtp_password': os.getenv('SMTP_PASSWORD'),
-            'station_id': os.getenv('STATION_ID', 'S000028') # Default to a test ID if not set
+            'station_id': os.getenv('STATION_ID', '') # Default to empty for all stations
         }
 
         validate_config(config)
         
-        # 1. Fetch the data status first
-        report = fetch_psws_status(config['station_id'])
+        # 1. Scrape the filenames
+        file_list = fetch_psws_file_list(config['station_id'])
         
-        # 2. Send the email with the report included
-        send_email(config, report)
+        # 2. Handle potential scrap failure
+        if file_list is None:
+            file_list = [] # Treat as empty if error occurred
+        
+        # 3. Send the email
+        send_email(config, file_list)
             
     except Exception as e:
         logging.error(f"Major failure: {str(e)}")
