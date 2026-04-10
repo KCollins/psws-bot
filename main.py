@@ -11,47 +11,48 @@ from datetime import datetime, timedelta
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
-def fetch_psws_file_list(station_id):
+def fetch_psws_summary():
     """
-    Scrapes the PSWS Observation List page for filenames from yesterday.
+    Scrapes the PSWS Observation List table for a general overview of yesterday's activity.
     """
     # Calculate "Yesterday"
     yesterday_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
     
-    # Construct the URL with filters
-    # Note: station_id can be left blank for 'all stations'
+    # URL for the general overview (all stations)
     base_url = "https://pswsnetwork.eng.ua.edu/observations/observation_list/"
-    query_url = (
-        f"{base_url}?station={station_id}"
-        f"&startDate__gte={yesterday_date}"
-        f"&endDate__lte={yesterday_date}"
-    )
+    query_url = f"{base_url}?station=&startDate__gte={yesterday_date}&endDate__lte={yesterday_date}"
     
-    files = []
+    report_data = []
     try:
-        logging.info(f"Scraping file list from: {query_url}")
+        logging.info(f"Scraping daily overview from: {query_url}")
         response = requests.get(query_url, timeout=30)
         response.raise_for_status()
         
         soup = BeautifulSoup(response.text, 'html.parser')
+        table = soup.find('table', {'class': 'obsTable'})
         
-        # Finding the filenames. 
-        # Based on the PSWS site structure, we look for text containing 'OBS' or links ending in '.zip'
-        for link in soup.find_all('a'):
-            href = link.get('href', '')
-            text = link.get_text().strip()
-            
-            if "OBS" in text and ".zip" in text:
-                files.append(text)
+        if not table:
+            return []
+
+        # Find all rows in the table body
+        rows = table.find('tbody').find_all('tr')
         
-        # Deduplicate and return
-        return sorted(list(set(files)))
+        for row in rows:
+            cols = row.find_all('td')
+            if len(cols) >= 6:
+                # Column 2 (index 2) is the Station Name
+                # Column 5 (index 5) is the File/Observation ID
+                station = cols[2].get_text(strip=True)
+                obs_id = cols[5].get_text(strip=True)
+                report_data.append(f"{station}: {obs_id}")
+        
+        return report_data
 
     except Exception as e:
         logging.error(f"Scraping failed: {str(e)}")
         return None
 
-def send_email(email_config, file_list):
+def send_email(email_config, observations):
     try:
         current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         yesterday_str = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
@@ -59,22 +60,24 @@ def send_email(email_config, file_list):
         msg = MIMEMultipart()
         msg['From'] = email_config['sender_email']
         msg['To'] = email_config['receiver_email']
-        msg['Subject'] = f"PSWS Update: {len(file_list)} files found for {yesterday_str}"
+        msg['Subject'] = f"PSWS Network Overview: {yesterday_str}"
         
-        # Format the list of files for the email body
-        if file_list:
-            file_section = "\n".join([f"• {f}" for f in file_list])
-            status_msg = f"The following {len(file_list)} files were posted yesterday:"
+        if observations:
+            count = len(observations)
+            # Create a clean list for the email
+            obs_list_text = "\n".join([f"• {item}" for item in observations[:50]]) # Limit to first 50 for readability
+            if count > 50:
+                obs_list_text += f"\n\n... and {count - 50} more observations."
+            
+            body_content = f"Yesterday, the network recorded {count} observations:\n\n{obs_list_text}"
         else:
-            file_section = "No files found for this period."
-            status_msg = "The network was quiet yesterday."
+            body_content = "No observations were recorded on the network yesterday."
 
         body = (
             f"Hello!\n\n"
-            f"--- Daily Report for {yesterday_str} ---\n"
-            f"{status_msg}\n\n"
-            f"{file_section}\n\n"
-            f"System check performed at: {current_time}.\n"
+            f"--- PSWS Daily Network Report ({yesterday_str}) ---\n\n"
+            f"{body_content}\n\n"
+            f"System check performed at: {current_time} UTC.\n"
             "— Your GitHub Bot"
         )
         
@@ -92,35 +95,27 @@ def send_email(email_config, file_list):
         logging.error(f"Failed to send email: {str(e)}")
         raise
 
-def validate_config(config):
-    required_keys = ['sender_email', 'receiver_email', 'smtp_server', 'smtp_port', 'smtp_password']
-    missing = [key for key in required_keys if not config.get(key)]
-    if missing:
-        raise ValueError(f"Missing environment variables: {', '.join(missing)}")
-
 if __name__ == "__main__":
     try:
+        # Load config from environment variables
         config = {
             'sender_email': os.getenv('SENDER_EMAIL'),
             'receiver_email': os.getenv('RECEIVER_EMAIL'),
             'smtp_server': os.getenv('SMTP_SERVER'),
             'smtp_port': os.getenv('SMTP_PORT'),
-            'smtp_password': os.getenv('SMTP_PASSWORD'),
-            'station_id': os.getenv('STATION_ID', '') # Default to empty for all stations
+            'smtp_password': os.getenv('SMTP_PASSWORD')
         }
 
-        validate_config(config)
+        # Validate config
+        if not all(config.values()):
+            raise ValueError("Missing one or more environment variables.")
+
+        # 1. Scrape the network overview
+        obs_data = fetch_psws_summary()
         
-        # 1. Scrape the filenames
-        file_list = fetch_psws_file_list(config['station_id'])
-        
-        # 2. Handle potential scrap failure
-        if file_list is None:
-            file_list = [] # Treat as empty if error occurred
-        
-        # 3. Send the email
-        send_email(config, file_list)
+        # 2. Send the email
+        send_email(config, obs_data if obs_data is not None else [])
             
     except Exception as e:
-        logging.error(f"Major failure: {str(e)}")
+        logging.error(f"Critical Bot Failure: {str(e)}")
         raise
