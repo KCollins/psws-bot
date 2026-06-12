@@ -6,7 +6,7 @@
 
 
 ## ✔️ About 
-A totally automated GitHub actions workflow that emails you daily tech (or any other category) news summaries to your inbox using GitHub Actions, NewsAPI, and SMTP. 
+A totally automated GitHub actions workflow that emails you daily tech (or any other category) news summaries to your inbox using GitHub Actions, NewsAPI, and SMTP.  
 
 ## ⚙️ Program Workflow 
 ```mermaid
