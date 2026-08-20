@@ -50,7 +50,7 @@ def fetch_psws_summary():
                 cols = row.find_all('td')
                 if len(cols) >= 6:
                     station_cell = cols[2]
-                    station_link_tag = station_cell.find('a')
+                    station_link_tag = cols[5].find('a')
                     
                     station_name = station_cell.get_text(strip=True)
                     station_url = f"{BASE_URL}{station_link_tag['href']}" if station_link_tag else "#"
@@ -85,7 +85,7 @@ def send_email(email_config, summary, filtered_url):
         # 1. Prepare the data pieces
         html_rows = ""
         total_obs = 0
-        sorted_stations = sorted(summary.items())
+        sorted_stations = sorted(summary.items(), key=lambda x: x[0].casefold())
 
         for station, data in sorted_stations:
             total_obs += data['count']
