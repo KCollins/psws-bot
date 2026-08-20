@@ -4,6 +4,8 @@
 ![Python Version](https://img.shields.io/badge/python-3.8%2B-blue) 
 ![Powered by NewsAPI](https://img.shields.io/badge/powered%20by-NewsAPI-orange)
 
+[![Daily Email](https://github.com/KCollins/psws-bot/actions/workflows/schedule.yml/badge.svg)](https://github.com/KCollins/psws-bot/actions/workflows/schedule.yml)
+
 
 ## ✔️ About 
 A totally automated GitHub actions workflow that emails you daily tech (or any other category) news summaries to your inbox using GitHub Actions, NewsAPI, and SMTP.  
